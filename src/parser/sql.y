@@ -289,17 +289,18 @@ table_extra_option : PRIMARY KEY '(' IDENTIFIER ')' {
 				   }
 
 alter_table_operation : ADD COLUMN table_field {
-                       alter_info_t *info = (alter_info_t*)malloc(sizeof(alter_info_t));
+                       alter_info_t *info = (alter_info_t*)calloc(1, sizeof(alter_info_t));
                        info->operation = ALTER_OPERATION_ADD_COLUMN;
                        // 复制field_item_t以避免内存管理冲突
                        field_item_t *src_field = $3;
-                       info->field_info = (field_item_t*)malloc(sizeof(field_item_t));
+                       info->field_info = (field_item_t*)calloc(1, sizeof(field_item_t));
                        info->field_info->name = strdup(src_field->name);
                        info->field_info->type = src_field->type;
                        info->field_info->width = src_field->width;
                        info->field_info->flags = src_field->flags;
                        info->field_info->default_value = NULL; // ALTER时不需要默认值
                        info->field_info->next = NULL;
+                       info->column_name = NULL;
                        $$ = info;
                    }
                    | DROP COLUMN IDENTIFIER {
