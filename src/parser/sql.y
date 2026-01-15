@@ -42,7 +42,7 @@ void yyerror(const char *s);
 %token LEFT RIGHT FULL ASC DESC ORDER BY IN ON AS
 %token DISTINCT GROUP USING INDEX TABLE DATABASE
 %token DEFAULT UNIQUE PRIMARY FOREIGN REFERENCES CHECK KEY OUTPUT
-%token ALTER RENAME TO ADD COLUMN MODIFY DROP
+%token ALTER RENAME TO ADD COLUMN MODIFY
 %token USE CREATE DROP SELECT INSERT UPDATE DELETE SHOW SET EXIT
 
 %token IDENTIFIER
@@ -62,6 +62,7 @@ void yyerror(const char *s);
 %type <rename_info> rename_table_stmt
 %type <alter_info> alter_table_stmt
 %type <alter_info> alter_table_operation
+%type <val_s> old_column_name new_column_name
 
 %type <field_items> table_field table_fields
 %type <table_def> create_table_stmt
@@ -306,6 +307,15 @@ alter_table_operation : ADD COLUMN table_field {
                        info->operation = ALTER_OPERATION_DROP_COLUMN;
                        info->column_name = strdup($3);
                        info->field_info = NULL;
+                       $$ = info;
+                   }
+                   | RENAME COLUMN IDENTIFIER TO IDENTIFIER {
+                       alter_info_t *info = (alter_info_t*)calloc(1, sizeof(alter_info_t));
+                       info->operation = ALTER_OPERATION_RENAME_COLUMN;
+                       info->old_column_name = strdup($3);
+                       info->new_column_name = strdup($5);
+                       info->field_info = NULL;
+                       info->column_name = NULL;
                        $$ = info;
                    }
                    | MODIFY COLUMN table_field {

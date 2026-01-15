@@ -69,6 +69,7 @@ typedef enum {
 typedef enum {
 	ALTER_OPERATION_ADD_COLUMN,
 	ALTER_OPERATION_DROP_COLUMN, 
+	ALTER_OPERATION_RENAME_COLUMN,
 	ALTER_OPERATION_MODIFY_COLUMN,
 	ALTER_OPERATION_RENAME_TABLE
 } alter_operation_type_t;
@@ -166,6 +167,8 @@ typedef struct alter_info_t {
 	alter_operation_type_t operation;
 	field_item_t *field_info;    // 用于ADD和MODIFY操作
 	char *column_name;           // 用于DROP操作
+	char *old_column_name;       // 用于RENAME操作
+	char *new_column_name;       // 用于RENAME操作
 } alter_info_t;
 
 #ifdef __cplusplus

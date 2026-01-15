@@ -232,6 +232,24 @@ void database::alter_table_drop_column(const char *table_name, const char *colum
 	}
 }
 
+void database::alter_table_rename_column(const char *table_name, const char *old_name, const char *new_name)
+{
+	if(!is_opened()) {
+		std::fprintf(stderr, "[Error] database not opened.\n");
+		return;
+	}
+	
+	table_manager *table = get_table(table_name);
+	if(!table) {
+		std::fprintf(stderr, "[Error] ALTER TABLE RENAME COLUMN: table `%s` not found!\n", table_name);
+		return;
+	}
+	
+	if(!table->alter_table_rename_column(old_name, new_name)) {
+		std::fprintf(stderr, "[Error] ALTER TABLE RENAME COLUMN: failed to rename column `%s` to `%s`\n", old_name, new_name);
+	}
+}
+
 void database::alter_table_modify_column(const char *table_name, const field_item_t *field)
 {
 	if(!is_opened()) {

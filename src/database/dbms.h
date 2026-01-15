@@ -29,6 +29,7 @@ public:
 	void alter_table_add_column(const char *table_name, const field_item_t *field);
 	void alter_table_drop_column(const char *table_name, const char *column_name);
 	void alter_table_modify_column(const char *table_name, const field_item_t *field);
+	void alter_table_rename_column(const char *table_name, const char *old_name, const char *new_name);
 
 	void create_index(const char *tb_name, const char *col_name);
 	void drop_index(const char *tb_name, const char *col_name);

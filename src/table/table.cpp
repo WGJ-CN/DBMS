@@ -362,6 +362,61 @@ bool table_manager::alter_table_drop_column(const char *column_name)
 	return true;
 }
 
+bool table_manager::alter_table_rename_column(const char *old_name, const char *new_name)
+{
+	if(!is_open) return false;
+	
+	// 查找要重命名的列
+	int col_index = -1;
+	for(int i = 0; i < header.col_num; ++i) {
+		if(std::strcmp(header.col_name[i], old_name) == 0) {
+			col_index = i;
+			break;
+		}
+	}
+
+	if(col_index < 0) {
+		std::fprintf(stderr, "[Error] ALTER TABLE RENAME COLUMN: column `%s` not found\n", old_name);
+		return false;
+	}
+
+	// 检查新列名是否已存在
+	for(int i = 0; i < header.col_num; ++i) {
+		if(std::strcmp(header.col_name[i], new_name) == 0) {
+			std::fprintf(stderr, "[Error] ALTER TABLE RENAME COLUMN: column `%s` already exists\n", new_name);
+			return false;
+		}
+	}
+
+	// 检查是否为系统列
+	if(std::strcmp(old_name, "__rowid__") == 0) {
+		std::fprintf(stderr, "[Error] ALTER TABLE RENAME COLUMN: cannot rename system column `%s`\n", old_name);
+		return false;
+	}
+
+	// 保存旧表头用于回滚
+	table_header_t old_header = header;
+
+	// 修改列名
+	std::strncpy(header.col_name[col_index], new_name, MAX_NAME_LEN);
+
+	// 保存修改后的表头
+	std::string thead = tname + ".thead";
+	std::ofstream ofs(thead, std::ios::binary);
+	if(!ofs) {
+		std::fprintf(stderr, "[Error] ALTER TABLE RENAME COLUMN: failed to save table header\n");
+		// 回滚表头修改
+		header = old_header;
+		return false;
+	}
+	
+	ofs.write((char*)&header, sizeof(header));
+	ofs.close();
+	
+	std::printf("[Info] ALTER TABLE RENAME COLUMN: column `%s` renamed to `%s` successfully\n", old_name, new_name);
+	return true;
+}
+
 bool table_manager::alter_table_modify_column(const field_item_t *field)
 {
 	if(!is_open) return false;

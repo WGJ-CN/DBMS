@@ -226,6 +226,13 @@ void execute_alter_table(const alter_info_t *alter_info)
 			alter_info->field_info
 		);
 		break;
+	case ALTER_OPERATION_RENAME_COLUMN:
+		dbms::get_instance()->alter_table_rename_column(
+			alter_info->table_name,
+			alter_info->old_column_name,
+			alter_info->new_column_name
+		);
+		break;
 	default:
 		fprintf(stderr, "[Error] Unknown ALTER TABLE operation\n");
 		break;
@@ -239,6 +246,12 @@ void execute_alter_table(const alter_info_t *alter_info)
 	}
 	if(alter_info->column_name) {
 		free((char*)alter_info->column_name);
+	}
+	if(alter_info->old_column_name) {
+		free((char*)alter_info->old_column_name);
+	}
+	if(alter_info->new_column_name) {
+		free((char*)alter_info->new_column_name);
 	}
 	free((void*)alter_info);
 }

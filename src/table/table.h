@@ -86,6 +86,7 @@ public:
 	// ALTER TABLE operations
 	bool alter_table_add_column(const field_item_t *field);
 	bool alter_table_drop_column(const char *column_name);
+	bool alter_table_rename_column(const char *old_name, const char *new_name);
 	bool alter_table_modify_column(const field_item_t *field);
 
 private:

@@ -527,11 +527,24 @@ void dbms::alter_table_drop_column(const char *table_name, const char *column_na
 	if(assert_db_open())
 		cur_db->alter_table_drop_column(table_name, column_name);
 }
-
 void dbms::alter_table_modify_column(const char *table_name, const field_item_t *field)
 {
-	if(assert_db_open())
-		cur_db->alter_table_modify_column(table_name, field);
+	if(!cur_db) {
+		std::fprintf(stderr, "[Error] No database selected.\n");
+		return;
+	}
+	
+	cur_db->alter_table_modify_column(table_name, field);
+}
+
+void dbms::alter_table_rename_column(const char *table_name, const char *old_name, const char *new_name)
+{
+	if(!cur_db) {
+		std::fprintf(stderr, "[Error] No database selected.\n");
+		return;
+	}
+	
+	cur_db->alter_table_rename_column(table_name, old_name, new_name);
 }
 
 void dbms::update_rows(const update_info_t *info)
