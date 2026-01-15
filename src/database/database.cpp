@@ -158,6 +158,10 @@ void database::rename_table(const char *old_name, const char *new_name)
 		return;
 	}
 	
+	// 先关闭当前表，然后重命名文件
+	table_manager *old_table = tables[id];
+	old_table->close();
+	
 	// 重命名表文件
 	std::string old_data_file = std::string(old_name) + ".tdata";
 	std::string old_head_file = std::string(old_name) + ".thead";
@@ -167,18 +171,23 @@ void database::rename_table(const char *old_name, const char *new_name)
 	if(rename(old_data_file.c_str(), new_data_file.c_str()) != 0 ||
 	   rename(old_head_file.c_str(), new_head_file.c_str()) != 0) {
 		std::fprintf(stderr, "[Error] RENAME TABLE: failed to rename table files!\n");
+		// 重命名失败，重新打开原表
+		old_table->open(old_name);
 		return;
 	}
 	
 	// 更新数据库信息
 	std::strncpy(info.table_name[id], new_name, MAX_NAME_LEN);
 	
-	// 重新打开表
-	table_manager *old_table = tables[id];
+	// 重新打开新命名的表
 	tables[id] = new table_manager;
 	if(!tables[id]->open(new_name)) {
 		std::fprintf(stderr, "[Error] RENAME TABLE: failed to reopen table!\n");
 		delete tables[id];
+		// 重命名失败，恢复原文件名并重新打开
+		rename(new_data_file.c_str(), old_data_file.c_str());
+		rename(new_head_file.c_str(), old_head_file.c_str());
+		old_table->open(old_name);
 		tables[id] = old_table;
 		return;
 	}

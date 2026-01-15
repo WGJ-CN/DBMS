@@ -40,7 +40,11 @@ update|UPDATE    { return UPDATE; }
 delete|DELETE    { return DELETE; }
 show|SHOW        { return SHOW; }
 set|SET          { return SET; }
+alter|ALTER      { return ALTER; }
+rename|RENAME    { return RENAME; }
 output|OUTPUT    { return OUTPUT; }
+add|ADD          { return ADD; }
+column|COLUMN    { return COLUMN; }
 
 database|DATABASE   { return DATABASE; }
 table|TABLE         { return TABLE; }
@@ -71,6 +75,7 @@ by|BY              { return BY; }
 in|IN              { return IN; }
 on|ON              { return ON; }
 as|AS              { return AS; }
+to|TO              { return TO; }
 distinct|DISTINCT  { return DISTINCT; }
 group|GROUP        { return GROUP; }
 using|USING        { return USING; }
