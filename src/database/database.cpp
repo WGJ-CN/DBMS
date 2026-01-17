@@ -3,6 +3,24 @@
 #include <string>
 #include <cstring>
 #include <cstdio>
+#include <sys/stat.h>
+
+// 辅助函数：构建带路径的文件名（项目根目录下的database文件夹）
+inline std::string get_db_file_path(const char *filename) {
+    return std::string("../../database/") + filename;
+}
+
+// 辅助函数：检查文件夹是否存在，不存在则创建
+inline void ensure_database_folder() {
+    struct stat st;
+    if (stat("../../database", &st) != 0) {
+        #ifdef _WIN32
+        mkdir("../../database");
+        #else
+        mkdir("../../database", 0755);
+        #endif
+    }
+}
 
 database::database() : opened(false)
 {
@@ -16,7 +34,8 @@ database::~database()
 void database::open(const char *db_name)
 {
 	assert(!is_opened());
-	std::string filename = db_name;
+	ensure_database_folder();
+	std::string filename = get_db_file_path(db_name);
 	filename += ".database";
 	std::ifstream ifs(filename, std::ios::binary);
 	ifs.read((char*)&info, sizeof(info));
@@ -51,7 +70,7 @@ void database::close()
 		}
 	}
 
-	std::string filename = info.db_name;
+	std::string filename = get_db_file_path(info.db_name);
 	filename += ".database";
 	std::ofstream ofs(filename, std::ios::binary);
 	ofs.write((char*)&info, sizeof(info));
@@ -84,7 +103,7 @@ void database::drop()
 	}
 
 	info.table_num = 0;
-	std::string filename = info.db_name;
+	std::string filename = get_db_file_path(info.db_name);
 	filename += ".database";
 	close();
 	std::remove(filename.c_str());
@@ -162,11 +181,11 @@ void database::rename_table(const char *old_name, const char *new_name)
 	table_manager *old_table = tables[id];
 	old_table->close();
 	
-	// 重命名表文件
-	std::string old_data_file = std::string(old_name) + ".tdata";
-	std::string old_head_file = std::string(old_name) + ".thead";
-	std::string new_data_file = std::string(new_name) + ".tdata";
-	std::string new_head_file = std::string(new_name) + ".thead";
+	// 重命名表文件（使用正确的路径）
+	std::string old_data_file = get_db_file_path(old_name) + ".tdata";
+	std::string old_head_file = get_db_file_path(old_name) + ".thead";
+	std::string new_data_file = get_db_file_path(new_name) + ".tdata";
+	std::string new_head_file = get_db_file_path(new_name) + ".thead";
 	
 	if(rename(old_data_file.c_str(), new_data_file.c_str()) != 0 ||
 	   rename(old_head_file.c_str(), new_head_file.c_str()) != 0) {
@@ -196,7 +215,7 @@ void database::rename_table(const char *old_name, const char *new_name)
 	tables[id]->update_table_name(new_name);
 	
 	// 立即保存更新后的数据库信息到文件
-	std::string db_filename = std::string(info.db_name) + ".database";
+	std::string db_filename = get_db_file_path(info.db_name) + ".database";
 	std::ofstream ofs(db_filename, std::ios::binary);
 	if(ofs) {
 		ofs.write((char*)&info, sizeof(info));

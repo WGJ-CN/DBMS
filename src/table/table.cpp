@@ -141,8 +141,9 @@ bool table_manager::open(const char *table_name)
 {
 	if(is_open) return false;
 	tname = table_name;
-	std::string thead = tname + ".thead";
-	std::string tdata = tname + ".tdata";
+	// 文件存储在项目根目录的database/文件夹下
+	std::string thead = "../../database/" + tname + ".thead";
+	std::string tdata = "../../database/" + tname + ".tdata";
 
 	std::ifstream ifs(thead, std::ios::binary);
 	ifs.read((char*)&header, sizeof(header));
@@ -161,7 +162,8 @@ bool table_manager::create(const char *table_name, const table_header_t *header)
 {
 	if(is_open) return false;
 	tname = table_name;
-	std::string tdata = tname + ".tdata";
+	// 文件存储在项目根目录的database/文件夹下
+	std::string tdata = "../../database/" + tname + ".tdata";
 
 	pg = std::make_shared<pager>(tdata.c_str());
 	btr = std::make_shared<int_btree>(pg.get(), 0);
@@ -180,8 +182,9 @@ void table_manager::drop()
 {
 	if(!is_open) return;
 	close();
-	std::string thead = tname + ".thead";
-	std::string tdata = tname + ".tdata";
+	// 文件存储在项目根目录的database/文件夹下
+	std::string thead = "../../database/" + tname + ".thead";
+	std::string tdata = "../../database/" + tname + ".tdata";
 	std::remove(thead.c_str());
 	std::remove(tdata.c_str());
 }
@@ -272,7 +275,7 @@ bool table_manager::alter_table_add_column(const field_item_t *field)
 	allocate_temp_record();
 	
 	// 保存修改后的表头
-	std::string thead = tname + ".thead";
+	std::string thead = "../../database/" + tname + ".thead";
 	FILE *f = std::fopen(thead.c_str(), "wb");
 	if(!f) {
 		std::fprintf(stderr, "[Error] ALTER TABLE: failed to save table header\n");
@@ -373,7 +376,7 @@ bool table_manager::alter_table_drop_column(const char *column_name)
 	allocate_temp_record();
 	
 	// 保存修改后的表头
-	std::string thead = tname + ".thead";
+	std::string thead = "../../database/" + tname + ".thead";
 	FILE *f = std::fopen(thead.c_str(), "wb");
 	if(!f) {
 		std::fprintf(stderr, "[Error] ALTER TABLE DROP COLUMN: failed to save table header\n");
@@ -429,7 +432,7 @@ bool table_manager::alter_table_rename_column(const char *old_name, const char *
 	std::strncpy(header.col_name[col_index], new_name, MAX_NAME_LEN);
 
 	// 保存修改后的表头
-	std::string thead = tname + ".thead";
+	std::string thead = "../../database/" + tname + ".thead";
 	std::ofstream ofs(thead, std::ios::binary);
 	if(!ofs) {
 		std::fprintf(stderr, "[Error] ALTER TABLE RENAME COLUMN: failed to save table header\n");
@@ -456,7 +459,7 @@ bool table_manager::update_table_name(const char *new_name)
 	std::strncpy(header.table_name, new_name, MAX_NAME_LEN);
 	
 	// 保存修改后的表头
-	std::string thead = tname + ".thead";
+	std::string thead = "../../database/" + tname + ".thead";
 	std::ofstream ofs(thead, std::ios::binary);
 	if(!ofs) {
 		std::fprintf(stderr, "[Error] UPDATE TABLE NAME: failed to save table header\n");
@@ -546,7 +549,7 @@ bool table_manager::alter_table_modify_column(const field_item_t *field)
 	allocate_temp_record();
 	
 	// 保存修改后的表头
-	std::string thead = tname + ".thead";
+	std::string thead = "../../database/" + tname + ".thead";
 	std::ofstream ofs(thead, std::ios::binary);
 	if(!ofs) {
 		std::fprintf(stderr, "[Error] ALTER TABLE MODIFY COLUMN: failed to save table header\n");
@@ -569,8 +572,9 @@ void table_manager::close()
 
 	if(!is_mirror)
 	{
-		std::string thead = tname + ".thead";
-		std::string tdata = tname + ".tdata";
+	// 文件存储在项目根目录的database/文件夹下
+	std::string thead = "../../database/" + tname + ".thead";
+	std::string tdata = "../../database/" + tname + ".tdata";
 
 		header.index_root[header.main_index] = btr->get_root_page_id();
 		free_indices();
