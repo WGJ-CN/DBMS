@@ -40,3 +40,7 @@ sql.output
 sql.tab.c
 sql.tab.h
 sql.yy.c
+
+# Log files
+logs/
+*.log
