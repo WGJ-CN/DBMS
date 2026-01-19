@@ -649,6 +649,8 @@ class TrivialDBGUI:
             condition = condition_entry.get().strip()
             group_by = group_by_entry.get().strip()
             having = having_entry.get().strip()
+            order_by = order_by_entry.get().strip()
+            order_direction = order_direction_var.get()
             
             if not tables:
                 messagebox.showerror("错误", "表名不能为空")
@@ -661,6 +663,8 @@ class TrivialDBGUI:
                 sql += f" GROUP BY {group_by}"
             if having:
                 sql += f" HAVING {having}"
+            if order_by:
+                sql += f" ORDER BY {order_by} {order_direction}"
             sql += ";"
             
             result = self.execute_sql(sql)
@@ -670,8 +674,8 @@ class TrivialDBGUI:
         
         dialog = tk.Toplevel(self.root)
         dialog.title("高级查询")
-        dialog.geometry("500x400")
-        self.center_dialog(dialog, 500, 400)
+        dialog.geometry("500x500")
+        self.center_dialog(dialog, 500, 500)
         
         ttk.Label(dialog, text="表名 (多表用逗号分隔):").pack(pady=5)
         tables_entry = ttk.Entry(dialog, width=40)
@@ -693,8 +697,20 @@ class TrivialDBGUI:
         having_entry = ttk.Entry(dialog, width=40)
         having_entry.pack(pady=5)
         
+        ttk.Label(dialog, text="排序依据 (ORDER BY子句):").pack(pady=5)
+        order_by_entry = ttk.Entry(dialog, width=40)
+        order_by_entry.pack(pady=5)
+        
+        # 排序方向选择
+        order_frame = ttk.Frame(dialog)
+        order_frame.pack(pady=5)
+        ttk.Label(order_frame, text="排序方向:").pack(side=tk.LEFT)
+        order_direction_var = tk.StringVar(value="ASC")
+        ttk.Radiobutton(order_frame, text="升序", variable=order_direction_var, value="ASC").pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(order_frame, text="降序", variable=order_direction_var, value="DESC").pack(side=tk.LEFT, padx=5)
+        
         btn_frame = ttk.Frame(dialog)
-        btn_frame.pack(pady=10)
+        btn_frame.pack(pady=15)
         
         ttk.Button(btn_frame, text="查询", command=on_query).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="取消", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
