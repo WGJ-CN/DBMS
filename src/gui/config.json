@@ -1,3 +1,4 @@
 {
-    "db_path": "../../build-win/bin/trivial_db.exe"
+    "db_path_win": "../../build-win/bin/trivial_db.exe",
+    "db_path_linux": "../../build/bin/trivial_db"
 }
