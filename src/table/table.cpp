@@ -260,7 +260,21 @@ bool table_manager::alter_table_add_column(const field_item_t *field)
 		default: col_type = 1; break; // 默认 INT
 	}
 	header.col_type[new_col_index] = col_type;
-	header.col_length[new_col_index] = field->width;
+	
+	// 设置正确的列长度
+	if (field->type == 0) { // INT
+		header.col_length[new_col_index] = 4;
+	} else if (field->type == 1) { // FLOAT
+		header.col_length[new_col_index] = 4;  
+	} else if (field->type == 2) { // CHAR
+		header.col_length[new_col_index] = field->width;
+	} else if (field->type == 3) { // DATE
+		header.col_length[new_col_index] = 4;
+	} else if (field->type == 4) { // VARCHAR
+		header.col_length[new_col_index] = field->width + 1; // +1 for null terminator
+	} else {
+		header.col_length[new_col_index] = 4; // 默认
+	}
 	
 	// 设置列标志
 	if(field->flags & FIELD_FLAG_NOTNULL) {
@@ -273,10 +287,32 @@ bool table_manager::alter_table_add_column(const field_item_t *field)
 		header.flag_unique |= (1 << new_col_index);
 	}
 	
-	// 重新计算列偏移量
-	header.col_offset[0] = 8; // rid + notnull mark
-	for(int i = 1; i < header.col_num; ++i) {
-		header.col_offset[i] = header.col_offset[i-1] + header.col_length[i-1];
+	// 重新计算列偏移量 - 正确处理系统列 __rowid__
+	int offset = 8; // 前8字节：rid(4) + notnull mark(4)
+	
+	// 先处理所有用户列（非系统列）
+	for(int i = 0; i < header.col_num; ++i) {
+		if (strcmp(header.col_name[i], "__rowid__") == 0) {
+			continue; // 跳过系统列
+		}
+		header.col_offset[i] = offset;
+		offset += header.col_length[i];
+	}
+	
+	// 处理系统列 __rowid__（在记录末尾）
+	for(int i = 0; i < header.col_num; ++i) {
+		if (strcmp(header.col_name[i], "__rowid__") == 0) {
+			header.col_offset[i] = offset;
+			offset += header.col_length[i]; // 加上系统列的长度
+			break;
+		}
+	}
+	
+	// 调试信息：打印列偏移量
+	printf("[DEBUG] Column offset calculation:\n");
+	for(int i = 0; i < header.col_num; ++i) {
+		printf("  Column %d: %s, offset=%d, length=%d\n", 
+		       i, header.col_name[i], header.col_offset[i], header.col_length[i]);
 	}
 	
 	// 重新分配临时记录缓冲区
