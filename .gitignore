@@ -54,6 +54,9 @@ database/*
 !database/mysql_privileges.tdata
 !database/.gitignore
 
+#backup files
+backup/*
+
 DBMS-25Fall.lnk
 init_auth.sql
 win_flex_bison-2.5.25/
