@@ -17,7 +17,7 @@ class TrivialDBGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("📦 TrivialDB 数据库管理系统")
-        self.root.geometry("1200x800")
+        self.root.geometry("1200x900")
         self.root.configure(bg="#ecf0f1")
         
         # 设置窗口图标（如果有）
@@ -170,9 +170,15 @@ class TrivialDBGUI:
         self.create_nav_button(nav_frame, "更新数据", self.update_data, 14, button_color, hover_color, active_color, text_color)
         self.create_nav_button(nav_frame, "删除数据", self.delete_data, 15, button_color, hover_color, active_color, text_color)
         
+        # 备份恢复操作分隔线
+        self.create_section_separator(nav_frame, "备份恢复", 17, 18)
+        
+        self.create_nav_button(nav_frame, "备份数据库", self.backup_database, 19, button_color, hover_color, active_color, text_color)
+        self.create_nav_button(nav_frame, "恢复数据库", self.restore_database, 20, button_color, hover_color, active_color, text_color)
+        
         # SQL命令行和退出
-        self.create_nav_button(nav_frame, "SQL命令行", self.open_sql_console, 17, button_color, hover_color, active_color, text_color)
-        self.create_nav_button(nav_frame, "退出程序", self.quit_app, 18, button_color, hover_color, active_color, text_color)
+        self.create_nav_button(nav_frame, "SQL命令行", self.open_sql_console, 21, button_color, hover_color, active_color, text_color)
+        self.create_nav_button(nav_frame, "退出程序", self.quit_app, 22, button_color, hover_color, active_color, text_color)
         
         # 状态栏
         self.status_var = tk.StringVar(value="就绪")
@@ -593,6 +599,200 @@ class TrivialDBGUI:
         """退出应用程序"""
         if messagebox.askyesno("退出", "确定要退出TrivialDB吗？"):
             self.root.destroy()
+    
+    def backup_database(self):
+        """备份数据库功能"""
+        if not self.current_db:
+            messagebox.showerror("错误", "请先选择或创建数据库")
+            return
+        
+        # 确认备份操作
+        if messagebox.askyesno("确认备份", f"确定要备份数据库 {self.current_db} 吗？"):
+            try:
+                import os
+                import shutil
+                
+                # 构建路径 - 直接使用相对于当前项目根目录的路径
+                # 获取当前脚本所在目录
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                # 项目根目录是script_dir的上两级（src/gui -> src -> root）
+                project_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
+                db_root = os.path.join(project_root, "database")
+                # 将备份目录放在项目根目录下，而不是database目录下
+                backup_root = os.path.join(project_root, "backup")
+                
+                # 确保备份目录存在
+                os.makedirs(backup_root, exist_ok=True)
+                
+                # 关闭数据库（如果打开）- 必须先关闭数据库，确保.dabase文件包含最新的表信息
+                if self.current_db:
+                    # 执行EXIT命令，让数据库引擎自动调用close()方法保存所有信息
+                    sql = "EXIT;"
+                    self.execute_sql(sql, require_db=False)
+                
+                # 复制数据库元信息文件
+                db_file = os.path.join(db_root, f"{self.current_db}.database")
+                backup_db_file = os.path.join(backup_root, f"{self.current_db}.database")
+                
+                # 检查数据库文件是否存在
+                if not os.path.exists(db_file):
+                    messagebox.showerror("错误", f"未找到数据库文件: {db_file}")
+                    return
+                
+                shutil.copy2(db_file, backup_db_file)
+                
+                # 获取表名列表 - 直接从数据库文件中读取表信息
+                tables = []
+                
+                try:
+                    import struct
+                    # 定义数据库信息结构（与database.h中的定义一致）
+                    # 结构包含：
+                    # - int table_num; (4字节)
+                    # - char db_name[MAX_NAME_LEN]; (64字节)
+                    # - char table_name[MAX_TABLE_NUM][MAX_NAME_LEN]; (16 * 64字节)
+                    
+                    with open(db_file, 'rb') as f:
+                        # 读取表数量（第一个字段是table_num）
+                        table_num = struct.unpack('i', f.read(4))[0]
+                        # 读取数据库名称
+                        db_name_bytes = f.read(64)  # 跳过数据库名称
+                        # 读取表名列表
+                        for i in range(table_num):
+                            table_name = f.read(64).decode('utf-8').strip('\x00')
+                            if table_name:
+                                tables.append(table_name)
+                except Exception as e:
+                    messagebox.showwarning("警告", f"无法获取表信息: {str(e)}")
+                
+                # 复制每个表的.thead和.tdata文件
+                if tables:
+                    for table_name in tables:
+                        # 复制表结构文件
+                        head_file = os.path.join(db_root, f"{table_name}.thead")
+                        backup_head_file = os.path.join(backup_root, f"{table_name}.thead")
+                        
+                        if os.path.exists(head_file):
+                            shutil.copy2(head_file, backup_head_file)
+                        else:
+                            messagebox.showwarning("警告", f"未找到表 {table_name} 的结构文件 {head_file}")
+                        
+                        # 复制表数据文件
+                        data_file = os.path.join(db_root, f"{table_name}.tdata")
+                        backup_data_file = os.path.join(backup_root, f"{table_name}.tdata")
+                        
+                        if os.path.exists(data_file):
+                            shutil.copy2(data_file, backup_data_file)
+                        else:
+                            messagebox.showwarning("警告", f"未找到表 {table_name} 的数据文件 {data_file}")
+                
+                messagebox.showinfo("成功", f"数据库 {self.current_db} 备份成功")
+                self.status_var.set(f"数据库 {self.current_db} 备份成功")
+                
+            except Exception as e:
+                messagebox.showerror("错误", f"备份时出错: {str(e)}")
+    
+    def restore_database(self):
+        """恢复数据库功能"""
+        # 打开对话框让用户输入要恢复的数据库名称
+        db_name = simpledialog.askstring("恢复数据库", "请输入要恢复的数据库名称:")
+        
+        if not db_name:
+            return
+        
+        # 确认恢复操作
+        if messagebox.askyesno("确认恢复", f"确定要从备份中恢复数据库 {db_name} 吗？"):
+            try:
+                import os
+                import shutil
+                
+                # 构建路径 - 直接使用相对于当前项目根目录的路径
+                # 获取当前脚本所在目录
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                # 项目根目录是script_dir的上两级（src/gui -> src -> root）
+                project_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
+                db_root = os.path.join(project_root, "database")
+                # 将备份目录放在项目根目录下，而不是database目录下
+                backup_root = os.path.join(project_root, "backup")
+                
+                # 检查备份文件是否存在
+                backup_db_file = os.path.join(backup_root, f"{db_name}.database")
+                if not os.path.exists(backup_db_file):
+                    messagebox.showerror("错误", f"未找到数据库 {db_name} 的备份文件")
+                    return
+                
+                # 关闭当前数据库（如果打开）
+                # 不需要手动调用EXIT，execute_sql方法会自动添加
+                
+                # 恢复数据库元信息文件
+                db_file = os.path.join(db_root, f"{db_name}.database")
+                shutil.copy2(backup_db_file, db_file)
+                
+                # 读取数据库表信息
+                import struct
+                db_info = {}
+                with open(db_file, 'rb') as f:
+                    db_info = {}
+                    # 假设数据库信息结构中包含表数量和表名列表
+                    # 这里需要根据实际的database.h中的结构来读取
+                    # 暂时使用简单的方法，通过备份文件获取表信息
+                    
+                # 从备份的数据库文件中读取表名列表
+                tables = []
+                
+                try:
+                    import struct
+                    # 从备份的数据库文件中读取表信息（与database.h结构一致）
+                    with open(backup_db_file, 'rb') as f:
+                        # 读取表数量（第一个字段是table_num）
+                        table_num = struct.unpack('i', f.read(4))[0]
+                        # 读取数据库名称
+                        db_name_bytes = f.read(64)  # 跳过数据库名称
+                        # 读取表名列表
+                        for i in range(table_num):
+                            table_name = f.read(64).decode('utf-8').strip('\x00')
+                            if table_name:
+                                tables.append(table_name)
+                except Exception as e:
+                    messagebox.showwarning("警告", f"无法从备份文件中读取表信息: {str(e)}")
+                    # 如果无法从备份文件中读取表信息，尝试通过备份目录中的文件获取
+                    messagebox.showinfo("信息", "将尝试通过备份目录中的文件恢复表")
+                    
+                # 如果从备份文件中没有读取到表信息，尝试通过备份目录中的文件获取
+                if not tables:
+                    # 获取备份目录中所有.thead文件的名称
+                    table_files = [f[:-6] for f in os.listdir(backup_root) if f.endswith('.thead')]
+                    tables = table_files
+                
+                # 恢复表文件
+                if tables:
+                    for table_name in tables:
+                        # 恢复表结构文件
+                        backup_head_file = os.path.join(backup_root, f"{table_name}.thead")
+                        head_file = os.path.join(db_root, f"{table_name}.thead")
+                        
+                        if os.path.exists(backup_head_file):
+                            shutil.copy2(backup_head_file, head_file)
+                        else:
+                            messagebox.showwarning("警告", f"未找到表 {table_name} 的备份结构文件 {backup_head_file}")
+                        
+                        # 恢复表数据文件
+                        backup_data_file = os.path.join(backup_root, f"{table_name}.tdata")
+                        data_file = os.path.join(db_root, f"{table_name}.tdata")
+                        
+                        if os.path.exists(backup_data_file):
+                            shutil.copy2(backup_data_file, data_file)
+                        else:
+                            messagebox.showwarning("警告", f"未找到表 {table_name} 的备份数据文件 {backup_data_file}")
+                
+                # 更新当前数据库信息
+                self.current_db = db_name
+                self.db_info_var.set(f"当前数据库: {db_name}")
+                messagebox.showinfo("成功", f"数据库 {db_name} 恢复成功")
+                self.status_var.set(f"数据库 {db_name} 恢复成功")
+                
+            except Exception as e:
+                messagebox.showerror("错误", f"恢复时出错: {str(e)}")
     
     def drop_table(self):
         """删除表对话框"""
