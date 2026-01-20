@@ -319,11 +319,29 @@ class TrivialDBGUI:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
                 cwd=exe_dir
             )
             
-            stdout, stderr = process.communicate(input=full_command)
+            # 使用二进制模式读取，然后手动解码避免编码问题
+            stdout, stderr = process.communicate(input=full_command.encode('utf-8'))
+            
+            # 尝试多种编码方式解码输出
+            def safe_decode(data):
+                if not data:
+                    return ""
+                try:
+                    # 首先尝试UTF-8
+                    return data.decode('utf-8')
+                except UnicodeDecodeError:
+                    try:
+                        # 如果UTF-8失败，尝试GBK
+                        return data.decode('gbk')
+                    except UnicodeDecodeError:
+                        # 如果都失败，使用错误替换
+                        return data.decode('utf-8', errors='replace')
+            
+            stdout = safe_decode(stdout)
+            stderr = safe_decode(stderr)
             
             if stderr:
                 messagebox.showerror("执行错误", stderr)
