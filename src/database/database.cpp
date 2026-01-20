@@ -39,13 +39,16 @@ inline void ensure_backup_folder() {
     }
 }
 
-database::database() : opened(false)
+database::database() : opened(false), temp_table_num(0)
 {
+	std::memset(temp_tables, 0, sizeof(temp_tables));
 }
 
 database::~database()
 {
 	if(is_opened()) close();
+	// 确保所有临时表都被释放
+	drop_all_temp_tables();
 }
 
 void database::open(const char *db_name)
@@ -86,6 +89,9 @@ void database::close()
 			tb = nullptr;
 		}
 	}
+
+	// 关闭数据库时清理所有临时表
+	drop_all_temp_tables();
 
 	std::string filename = get_db_file_path(info.db_name);
 	filename += ".database";
@@ -130,7 +136,18 @@ table_manager* database::get_table(const char *name)
 {
 	assert(is_opened());
 	int id = get_table_id(name);
-	return id >= 0 ? tables[id] : nullptr;
+	if (id >= 0) {
+		return tables[id];
+	}
+	
+	// 检查临时表
+	for (int i = 0; i < temp_table_num; ++i) {
+		if (std::strcmp(name, temp_tables[i]->get_table_name()) == 0) {
+			return temp_tables[i];
+		}
+	}
+	
+	return nullptr;
 }
 
 table_manager* database::get_table(int id)
@@ -449,4 +466,94 @@ void database::restore(const char *backup_file) {
     open(backup_file);
     
     std::printf("[Info] Database '%s' restored successfully from backup directory.\n", backup_file);
+}
+
+// 临时表支持实现
+void database::create_temp_table(const char *table_name, const table_header_t *header)
+{
+	assert(is_opened());
+	
+	// 检查临时表名是否已存在
+	if (get_table(table_name) != nullptr) {
+		std::fprintf(stderr, "[Error] CREATE TEMP TABLE: table `%s` already exists.\n", table_name);
+		return;
+	}
+	
+	// 检查是否超过最大临时表数量
+	if (temp_table_num >= MAX_TABLE_NUM) {
+		std::fprintf(stderr, "[Error] CREATE TEMP TABLE: maximum number of temporary tables reached.\n");
+		return;
+	}
+	
+	// 创建临时表
+	temp_tables[temp_table_num] = new table_manager;
+	temp_tables[temp_table_num]->create(table_name, header);
+	
+	temp_table_num++;
+	
+	std::fprintf(stderr, "[Info] Temporary table `%s` created.\n", table_name);
+}
+
+void database::drop_temp_table(const char *table_name)
+{
+	assert(is_opened());
+	
+	// 查找临时表
+	int index = -1;
+	for (int i = 0; i < temp_table_num; ++i) {
+		if (std::strcmp(table_name, temp_tables[i]->get_table_name()) == 0) {
+			index = i;
+			break;
+		}
+	}
+	
+	if (index == -1) {
+		std::fprintf(stderr, "[Error] DROP TEMP TABLE: table `%s` not found.\n", table_name);
+		return;
+	}
+	
+	// 删除临时表
+	temp_tables[index]->drop();
+	delete temp_tables[index];
+	
+	// 移动后面的临时表
+	for (int i = index; i < temp_table_num - 1; ++i) {
+		temp_tables[i] = temp_tables[i + 1];
+	}
+	
+	temp_tables[--temp_table_num] = nullptr;
+	
+	std::fprintf(stderr, "[Info] Temporary table `%s` dropped.\n", table_name);
+}
+
+void database::drop_all_temp_tables()
+{
+	for (int i = 0; i < temp_table_num; ++i) {
+		if (temp_tables[i] != nullptr) {
+			temp_tables[i]->drop();
+			delete temp_tables[i];
+			temp_tables[i] = nullptr;
+		}
+	}
+	
+	temp_table_num = 0;
+}
+
+bool database::is_temp_table(const char *table_name)
+{
+	assert(is_opened());
+	
+	// 检查是否是普通表
+	if (get_table_id(table_name) >= 0) {
+		return false;
+	}
+	
+	// 检查是否是临时表
+	for (int i = 0; i < temp_table_num; ++i) {
+		if (std::strcmp(table_name, temp_tables[i]->get_table_name()) == 0) {
+			return true;
+		}
+	}
+	
+	return false;
 }

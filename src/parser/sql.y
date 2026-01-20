@@ -218,12 +218,21 @@ table_item          : table_name {
 					 	$$ = (table_join_info_t*)calloc(1, sizeof(table_join_info_t));
 						$$->join_type = TABLE_JOIN_NONE;
 						$$->table = $1;
+						$$->is_subquery = 0;
 					}
 				    | table_name AS IDENTIFIER {
 					 	$$ = (table_join_info_t*)calloc(1, sizeof(table_join_info_t));
 						$$->join_type = TABLE_JOIN_NONE;
 						$$->table = $1;
 						$$->alias = $3;
+						$$->is_subquery = 0;
+					}
+					| '(' select_stmt ')' AS IDENTIFIER {
+						$$ = (table_join_info_t*)calloc(1, sizeof(table_join_info_t));
+						$$->join_type = TABLE_JOIN_NONE;
+						$$->is_subquery = 1;
+						$$->subquery = $2;
+						$$->alias = $5;
 					}
 					;
 
@@ -529,6 +538,14 @@ cond_term  : expr compare_op expr {
 				$$->left  = $1;
 				$$->right = $4;
 				$$->op    = OPERATOR_IN;
+		   }
+		   | expr IN '(' select_stmt ')' {
+		   		$$ = (expr_node_t*)calloc(1, sizeof(expr_node_t));
+				$$->left  = $1;
+				$$->right = NULL;
+				$$->op    = OPERATOR_IN;
+				$$->subquery = $4;
+				$$->term_type = TERM_SUBQUERY;
 		   }
 		   | expr IS NULL_TOKEN {
 		   		$$ = (expr_node_t*)calloc(1, sizeof(expr_node_t));

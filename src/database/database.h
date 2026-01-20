@@ -9,17 +9,19 @@
 #include <vector>
 
 class database
-{
-	struct database_info
 	{
-		int table_num;
-		char db_name[MAX_NAME_LEN];
-		char table_name[MAX_TABLE_NUM][MAX_NAME_LEN];
-	} info;
+		struct database_info
+		{
+			int table_num;
+			char db_name[MAX_NAME_LEN];
+			char table_name[MAX_TABLE_NUM][MAX_NAME_LEN];
+		} info;
 
-	table_manager *tables[MAX_TABLE_NUM];
+		table_manager *tables[MAX_TABLE_NUM];
+		table_manager *temp_tables[MAX_TABLE_NUM];
+		int temp_table_num;
 
-	bool opened;
+		bool opened;
 public:
 	database();
 	~database();
@@ -43,6 +45,12 @@ public:
 	void show_info();
 	void backup(const char *backup_file);
 	void restore(const char *backup_file);
+	
+	// 临时表支持
+	void create_temp_table(const char *table_name, const table_header_t *header);
+	void drop_temp_table(const char *table_name);
+	void drop_all_temp_tables();
+	bool is_temp_table(const char *table_name);
 };
 
 #endif

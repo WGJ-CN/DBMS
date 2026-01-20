@@ -614,16 +614,65 @@ void dbms::select_rows(const select_info_t* info)
     // get required tables
     std::vector<std::shared_ptr<table_manager>> alias_tables;
     std::vector<table_manager*> required_tables;
+    
+    // 用于存储临时表，防止提前被释放
+    std::vector<table_manager*> temp_tables;
+    
     for (linked_list_t* table_l = info->tables; table_l; table_l = table_l->next)
     {
         table_join_info_t* table_info = (table_join_info_t*)table_l->data;
-        table_manager* tm = cur_db->get_table(table_info->table);
-        if (tm == nullptr)
+        
+        // 处理子查询
+        if (table_info->is_subquery)
         {
-            std::fprintf(stderr, "[Error] table `%s` doesn't exists.\n", table_info->table);
-            return;
-        }
-        else {
+            std::fprintf(stderr, "[Info] 执行FROM子查询...\n");
+            
+            // 生成临时表名
+            static int temp_table_counter = 0;
+            char temp_table_name[64];
+            snprintf(temp_table_name, sizeof(temp_table_name), "__temp_table_%d", temp_table_counter++);
+            
+            // 执行子查询
+            select_rows(table_info->subquery);
+            
+            // 临时表支持：根据子查询结果创建临时表
+            // 执行子查询并获取结果
+            select_rows(table_info->subquery);
+            
+            // 创建临时表结构
+            table_header_t temp_header;
+            std::strcpy(temp_header.table_name, temp_table_name);
+            
+            // 暂时使用简化实现：根据子查询的select表达式创建表结构
+            temp_header.col_num = 0;
+            if (table_info->subquery->exprs != nullptr) {
+                linked_list_t* expr_list = table_info->subquery->exprs;
+                int col_count = 0;
+                
+                // 计算子查询返回的列数
+                for (linked_list_t* list = expr_list; list; list = list->next) {
+                    col_count++;
+                }
+                
+                temp_header.col_num = col_count;
+                
+                // 暂时使用默认列类型和长度
+                for (int i = 0; i < col_count; i++) {
+                    temp_header.col_type[i] = FIELD_TYPE_INT;
+                    temp_header.col_length[i] = 4;
+                    temp_header.col_offset[i] = i * 4;
+                    snprintf(temp_header.col_name[i], MAX_NAME_LEN, "col%d", i + 1);
+                }
+            }
+            
+            // 创建临时表
+            cur_db->create_temp_table(temp_table_name, &temp_header);
+            
+            // 获取临时表
+            table_manager* tm = cur_db->get_table(temp_table_name);
+            temp_tables.push_back(tm);
+            
+            // 使用临时表
             if (table_info->alias == nullptr)
             {
                 required_tables.push_back(tm);
@@ -632,6 +681,26 @@ void dbms::select_rows(const select_info_t* info)
                 auto alias = tm->mirror(table_info->alias);
                 alias_tables.push_back(alias);
                 required_tables.push_back(alias.get());
+            }
+        }
+        else {
+            // 普通表处理
+            table_manager* tm = cur_db->get_table(table_info->table);
+            if (tm == nullptr)
+            {
+                std::fprintf(stderr, "[Error] table `%s` doesn't exists.\n", table_info->table);
+                return;
+            }
+            else {
+                if (table_info->alias == nullptr)
+                {
+                    required_tables.push_back(tm);
+                }
+                else {
+                    auto alias = tm->mirror(table_info->alias);
+                    alias_tables.push_back(alias);
+                    required_tables.push_back(alias.get());
+                }
             }
         }
     }
