@@ -12,6 +12,7 @@ import os
 import json
 import platform
 from pathlib import Path
+import ctypes
 
 class TrivialDBGUI:
     def __init__(self, root):
@@ -1151,6 +1152,18 @@ class SQLConsole(tk.Toplevel):
 
 def main():
     """主函数"""
+    # 解决 Windows 下界面模糊/分辨率低的问题
+    if platform.system() == "Windows":
+        try:
+            # Windows 8.1+
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            try:
+                # Windows Vista/7/8
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
+
     root = tk.Tk()
     app = TrivialDBGUI(root)
     root.mainloop()

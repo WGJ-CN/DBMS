@@ -46,10 +46,13 @@ logs/
 *.log
 
 # Database files
-database/
-*.database
-*.tdata
-*.thead
+database/*
+!database/sys_db.database
+!database/mysql_user.thead
+!database/mysql_user.tdata
+!database/mysql_privileges.thead
+!database/mysql_privileges.tdata
+!database/.gitignore
 
 DBMS-25Fall.lnk
 init_auth.sql
