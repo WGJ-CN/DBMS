@@ -79,6 +79,7 @@ cd build-win/bin
 - ✅ `ALTER TABLE` - 表结构修改（ADD/DROP/RENAME/MODIFY COLUMN）
 - ✅ `RENAME TABLE` - 表重命名
 - ✅ `SHOW DATABASE/TABLE` - 信息显示
+- ✅ `BACKUP/RESTORE` - 数据备份和恢复
 
 ### 数据类型支持
 - **INT** - 整型
@@ -149,6 +150,24 @@ TrivialDB/
 ├── run_gui.py      # GUI启动器
 └── README.md       # 项目说明
 ```
+
+## 💾 数据备份和恢复功能文件结构
+
+以下是实现数据备份和恢复功能的核心文件及其相对路径：
+
+### GUI界面层
+- `src/gui/trivialdb_gui.py` - 实现了GUI界面的备份和恢复按钮功能
+
+### SQL解析层
+- `src/parser/sql.y` - SQL语法定义，添加了BACKUP和RESTORE命令
+- `src/parser/execute.cpp` - 实现了BACKUP和RESTORE命令的执行逻辑
+- `src/parser/execute.h` - 声明了BACKUP和RESTORE命令的执行函数
+
+### 数据库管理层
+- `src/database/dbms.cpp` - 数据库管理系统的备份和恢复功能实现
+- `src/database/dbms.h` - 数据库管理系统的备份和恢复函数声明
+- `src/database/database.cpp` - 单个数据库的备份和恢复功能实现
+- `src/database/database.h` - 单个数据库的备份和恢复函数声明
 
 ## 🔧 开发指南
 

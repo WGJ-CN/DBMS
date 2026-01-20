@@ -10,6 +10,11 @@ inline std::string get_db_file_path(const char *filename) {
     return std::string("../../database/") + filename;
 }
 
+// 辅助函数：构建backup目录下的文件路径
+inline std::string get_backup_file_path(const char *filename) {
+    return std::string("../../database/backup/") + filename;
+}
+
 // 辅助函数：检查文件夹是否存在，不存在则创建
 inline void ensure_database_folder() {
     struct stat st;
@@ -18,6 +23,18 @@ inline void ensure_database_folder() {
         mkdir("../../database");
         #else
         mkdir("../../database", 0755);
+        #endif
+    }
+}
+
+// 辅助函数：确保backup目录存在
+inline void ensure_backup_folder() {
+    struct stat st;
+    if (stat("../../database/backup", &st) != 0) {
+        #ifdef _WIN32
+        mkdir("../../database/backup");
+        #else
+        mkdir("../../database/backup", 0755);
         #endif
     }
 }
@@ -335,48 +352,44 @@ void database::backup(const char *backup_file) {
     // 先关闭数据库确保所有数据已保存
     close();
     
-    // 构建备份目录
-    std::string backup_path = get_db_file_path(backup_file);
+    // 确保backup目录存在
+    ensure_backup_folder();
     
-    // 复制数据库元信息文件
-    std::string db_file = get_db_file_path(info.db_name) + ".database";
-    std::string backup_db_file = backup_path + ".database";
+    // 复制数据库元信息文件到backup目录
+    std::string db_file = get_db_file_path(backup_file) + ".database";
+    std::string backup_db_file = get_backup_file_path(backup_file) + ".database";
     if (!copy_file(db_file, backup_db_file)) {
         std::fprintf(stderr, "[Error] Failed to backup database file.\n");
         // 重新打开数据库
-        open(info.db_name);
+        open(backup_file);
         return;
     }
     
-    // 复制所有表的文件
+    // 重新打开数据库获取表信息
+    open(backup_file);
+    
+    // 复制所有表的文件到backup目录
     for (int i = 0; i < info.table_num; ++i) {
         const char *table_name = info.table_name[i];
         
         // 复制表结构文件
         std::string table_head_file = get_db_file_path(table_name) + ".thead";
-        std::string backup_head_file = backup_path + "_" + table_name + ".thead";
+        std::string backup_head_file = get_backup_file_path(table_name) + ".thead";
         if (!copy_file(table_head_file, backup_head_file)) {
             std::fprintf(stderr, "[Error] Failed to backup table head file: %s\n", table_name);
-            // 重新打开数据库
-            open(info.db_name);
             return;
         }
         
         // 复制表数据文件
         std::string table_data_file = get_db_file_path(table_name) + ".tdata";
-        std::string backup_data_file = backup_path + "_" + table_name + ".tdata";
+        std::string backup_data_file = get_backup_file_path(table_name) + ".tdata";
         if (!copy_file(table_data_file, backup_data_file)) {
             std::fprintf(stderr, "[Error] Failed to backup table data file: %s\n", table_name);
-            // 重新打开数据库
-            open(info.db_name);
             return;
         }
     }
     
-    // 重新打开数据库
-    open(info.db_name);
-    
-    std::printf("[Info] Database '%s' backed up successfully to '%s'.\n", info.db_name, backup_file);
+    std::printf("[Info] Database '%s' backed up successfully to backup directory.\n", backup_file);
 }
 
 void database::restore(const char *backup_file) {
@@ -385,35 +398,38 @@ void database::restore(const char *backup_file) {
         close();
     }
     
-    // 构建备份文件路径
-    std::string backup_path = get_db_file_path(backup_file);
-    
-    // 检查备份文件是否存在
-    std::string backup_db_file = backup_path + ".database";
-    std::ifstream backup_file_check(backup_db_file);
-    if (!backup_file_check) {
-        std::fprintf(stderr, "[Error] Backup file not found: %s\n", backup_file);
+    // 检查backup目录是否存在
+    struct stat st;
+    if (stat("../../database/backup", &st) != 0) {
+        std::fprintf(stderr, "[Error] Backup directory not found.\n");
         return;
     }
     
     // 读取备份的数据库信息
-    database_info backup_info;
-    std::ifstream backup_info_file(backup_db_file, std::ios::binary);
-    backup_info_file.read((char*)&backup_info, sizeof(backup_info));
+    std::string backup_db_file = get_backup_file_path(backup_file) + ".database";
+    std::ifstream backup_file_check(backup_db_file);
+    if (!backup_file_check) {
+        std::fprintf(stderr, "[Error] Backup file not found in backup directory.\n");
+        return;
+    }
     
     // 恢复数据库元信息文件
-    std::string db_file = get_db_file_path(backup_info.db_name) + ".database";
+    std::string db_file = get_db_file_path(backup_file) + ".database";
     if (!copy_file(backup_db_file, db_file)) {
         std::fprintf(stderr, "[Error] Failed to restore database file.\n");
         return;
     }
     
+    // 读取数据库信息
+    std::ifstream db_info_file(db_file, std::ios::binary);
+    db_info_file.read((char*)&info, sizeof(info));
+    
     // 恢复所有表的文件
-    for (int i = 0; i < backup_info.table_num; ++i) {
-        const char *table_name = backup_info.table_name[i];
+    for (int i = 0; i < info.table_num; ++i) {
+        const char *table_name = info.table_name[i];
         
         // 恢复表结构文件
-        std::string backup_head_file = backup_path + "_" + table_name + ".thead";
+        std::string backup_head_file = get_backup_file_path(table_name) + ".thead";
         std::string table_head_file = get_db_file_path(table_name) + ".thead";
         if (!copy_file(backup_head_file, table_head_file)) {
             std::fprintf(stderr, "[Error] Failed to restore table head file: %s\n", table_name);
@@ -421,7 +437,7 @@ void database::restore(const char *backup_file) {
         }
         
         // 恢复表数据文件
-        std::string backup_data_file = backup_path + "_" + table_name + ".tdata";
+        std::string backup_data_file = get_backup_file_path(table_name) + ".tdata";
         std::string table_data_file = get_db_file_path(table_name) + ".tdata";
         if (!copy_file(backup_data_file, table_data_file)) {
             std::fprintf(stderr, "[Error] Failed to restore table data file: %s\n", table_name);
@@ -430,7 +446,7 @@ void database::restore(const char *backup_file) {
     }
     
     // 打开恢复后的数据库
-    open(backup_info.db_name);
+    open(backup_file);
     
-    std::printf("[Info] Database restored successfully from '%s'.\n", backup_file);
+    std::printf("[Info] Database '%s' restored successfully from backup directory.\n", backup_file);
 }

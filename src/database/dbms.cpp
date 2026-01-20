@@ -704,7 +704,7 @@ void dbms::select_rows(const select_info_t* info)
                     const char* col_name = table->get_column_name(j);
 
                     column_ref_t* col_ref = new column_ref_t;
-                    col_ref->table = nullptr;
+                    col_ref->table = strdup(table->get_table_name());
                     col_ref->column = strdup(col_name);
 
                     expr_node_t* col_expr = new expr_node_t;
@@ -961,7 +961,7 @@ void dbms::select_rows(const select_info_t* info)
                             printf("[DEBUG] Creating expression for column %s\n", col_name);
 
                             column_ref_t* col_ref = new column_ref_t;
-                            col_ref->table = nullptr;
+                            col_ref->table = strdup(table->get_table_name());
                             col_ref->column = strdup(col_name);
 
                             expr_node_t* col_expr = new expr_node_t;
