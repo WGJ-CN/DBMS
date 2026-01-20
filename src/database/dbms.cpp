@@ -719,6 +719,10 @@ void dbms::select_rows(const select_info_t* info)
         expr_names.push_back(expression::to_string(expr));
     }
 
+    // 反转表达式顺序，因为解析器使用头插法构建链表，导致顺序与输入相反
+    std::reverse(exprs.begin(), exprs.end());
+    std::reverse(expr_names.begin(), expr_names.end());
+
     // output header info
     for (size_t i = 0; i < exprs.size(); ++i)
     {
@@ -728,10 +732,19 @@ void dbms::select_rows(const select_info_t* info)
 
     if (exprs.size() == 0)
     {
+        // SELECT * 时，反向遍历列以保持定义顺序（存储顺序是反的）
+        bool first_col = true;
         for (size_t i = 0; i < required_tables.size(); ++i)
         {
-            if (i != 0) std::fprintf(output_file, ",");
-            required_tables[i]->dump_header(output_file);
+            table_manager* table = required_tables[i];
+            int col_count = table->get_column_num();
+            const char* table_name = table->get_table_name();
+            // 排除 __rowid__ 列，并反向遍历以保持列定义顺序
+            for (int j = col_count - 2; j >= 0; --j) {
+                if (!first_col) std::fprintf(output_file, ",");
+                first_col = false;
+                std::fprintf(output_file, "%s.%s", table_name, table->get_column_name(j));
+            }
         }
     }
 
@@ -770,8 +783,8 @@ void dbms::select_rows(const select_info_t* info)
             for (size_t i = 0; i < required_tables.size(); ++i) {
                 table_manager* table = required_tables[i];
                 int col_count = table->get_column_num();
-                // 排除 __rowid__ 列
-                for (int j = 0; j < col_count - 1; ++j) {
+                // 排除 __rowid__ 列，并反向遍历以保持列定义顺序（存储顺序是反的）
+                for (int j = col_count - 2; j >= 0; --j) {
                     const char* col_name = table->get_column_name(j);
 
                     column_ref_t* col_ref = new column_ref_t;
@@ -848,6 +861,9 @@ void dbms::select_rows(const select_info_t* info)
                         value_str = "NULL";
                         break;
                     default:
+                        // 注意：此 default 分支用于处理未预期的类型值（如 TERM_NONE=0 或 TERM_COLUMN_REF 等）
+                        // 正常情况下不应到达此处，若到达说明 expression::eval() 返回了非终结类型
+                        // 这不是错误，只是标记为 UNKNOWN 继续处理，不影响最终输出
                         value_str = "UNKNOWN";
                     }
 
@@ -1004,6 +1020,44 @@ void dbms::select_rows(const select_info_t* info)
         // 用于存储已经出现过的行（去重）
         std::unordered_set<std::string> seen_rows;
 
+        // 确定要计算的表达式列表（移到 lambda 外部，避免每行重复创建）
+        std::vector<expr_node_t*> actual_exprs = exprs;
+        std::vector<std::shared_ptr<expr_node_t>> temp_exprs_holder; // 使用 shared_ptr 自动管理内存
+
+        if (exprs.size() == 0) {
+            // SELECT * 的情况，需要为所有列创建表达式
+            printf("[DEBUG] SELECT * detected, creating expressions for all columns\n");
+            for (size_t i = 0; i < required_tables.size(); ++i) {
+                table_manager* table = required_tables[i];
+                int col_count = table->get_column_num();
+                printf("[DEBUG] Table %s has %d columns\n", table->get_table_name(), col_count);
+                // 排除 __rowid__ 列，并反向遍历以保持列定义顺序（存储顺序是反的）
+                for (int j = col_count - 2; j >= 0; --j) {
+                    const char* col_name = table->get_column_name(j);
+                    printf("[DEBUG] Creating expression for column %s\n", col_name);
+
+                    column_ref_t* col_ref = new column_ref_t;
+                    col_ref->table = nullptr;
+                    col_ref->column = strdup(col_name);
+
+                    expr_node_t* col_expr = new expr_node_t;
+                    col_expr->term_type = TERM_COLUMN_REF;
+                    col_expr->column_ref = col_ref;
+
+                    actual_exprs.push_back(col_expr);
+                    temp_exprs_holder.push_back(std::shared_ptr<expr_node_t>(col_expr,
+                        [](expr_node_t* p) {
+                            if (p->term_type == TERM_COLUMN_REF && p->column_ref) {
+                                free(p->column_ref->column);
+                                delete p->column_ref;
+                            }
+                            delete p;
+                        }));
+                }
+            }
+            printf("[DEBUG] Created %zu expressions for SELECT *\n", actual_exprs.size());
+        }
+
         // 遍历记录
         int counter = 0;
         iterate(required_tables, info->where,
@@ -1013,38 +1067,6 @@ void dbms::select_rows(const select_info_t* info)
             {
                 // 构建当前行的字符串表示
                 std::string current_row;
-
-                // 处理 SELECT 表达式列表
-                // 如果是 SELECT *，需要为所有列创建表达式
-                std::vector<expr_node_t*> actual_exprs = exprs;
-                std::vector<expr_node_t*> temp_exprs; // 用于存储临时创建的表达式（SELECT * 时）
-
-                if (exprs.size() == 0) {
-                    // SELECT * 的情况，需要为所有列创建表达式
-                    printf("[DEBUG] SELECT * detected, creating expressions for all columns\n");
-                    for (size_t i = 0; i < required_tables.size(); ++i) {
-                        table_manager* table = required_tables[i];
-                        int col_count = table->get_column_num();
-                        printf("[DEBUG] Table %s has %d columns\n", table->get_table_name(), col_count);
-                        // 排除 __rowid__ 列（通常是最后一列）
-                        for (int j = 0; j < col_count - 1; ++j) {
-                            const char* col_name = table->get_column_name(j);
-                            printf("[DEBUG] Creating expression for column %s\n", col_name);
-
-                            column_ref_t* col_ref = new column_ref_t;
-                            col_ref->table = nullptr;
-                            col_ref->column = strdup(col_name);
-
-                            expr_node_t* col_expr = new expr_node_t;
-                            col_expr->term_type = TERM_COLUMN_REF;
-                            col_expr->column_ref = col_ref;
-
-                            actual_exprs.push_back(col_expr);
-                            temp_exprs.push_back(col_expr); // 记录临时创建的表达式
-                        }
-                    }
-                    printf("[DEBUG] Created %zu expressions for SELECT *\n", actual_exprs.size());
-                }
 
                 // 为 DISTINCT 构建行字符串
                 for (size_t i = 0; i < actual_exprs.size(); ++i) {
@@ -1062,14 +1084,7 @@ void dbms::select_rows(const select_info_t* info)
                     }
                     catch (const char* e) {
                         std::fprintf(stderr, "%s\n", e);
-                        // 清理临时内存
-                        for (auto expr : temp_exprs) {
-                            if (expr->term_type == TERM_COLUMN_REF && expr->column_ref) {
-                                free(expr->column_ref->column);
-                                delete expr->column_ref;
-                            }
-                            delete expr;
-                        }
+                        // 内存由 shared_ptr 自动管理，无需手动清理
                         return false;
                     }
 
@@ -1110,6 +1125,9 @@ void dbms::select_rows(const select_info_t* info)
                         printf("[DEBUG]   null value\n");
                         break;
                     default:
+                        // 注意：此 default 分支用于处理未预期的类型值（如 TERM_NONE=0 或 TERM_COLUMN_REF 等）
+                        // 正常情况下不应到达此处，若到达说明 expression::eval() 返回了非终结类型
+                        // 这不是错误，只是标记为 UNKNOWN 继续处理，不影响最终输出
                         value_str = "UNKNOWN";
                         printf("[DEBUG]   unknown type\n");
                     }
@@ -1124,15 +1142,7 @@ void dbms::select_rows(const select_info_t* info)
                     // 检查这一行是否已经出现过
                     if (seen_rows.find(current_row) != seen_rows.end())
                     {
-                        // 重复行，跳过
-                        // 清理临时内存
-                        for (auto expr : temp_exprs) {
-                            if (expr->term_type == TERM_COLUMN_REF && expr->column_ref) {
-                                free(expr->column_ref->column);
-                                delete expr->column_ref;
-                            }
-                            delete expr;
-                        }
+                        // 重复行，跳过（内存由 shared_ptr 自动管理）
                         return true;
                     }
 
@@ -1140,23 +1150,16 @@ void dbms::select_rows(const select_info_t* info)
                     seen_rows.insert(current_row);
                 }
 
-                // 输出这一行（使用原来的输出逻辑）
-                for (size_t i = 0; i < exprs.size(); ++i)
+                // 输出这一行（统一使用 actual_exprs，确保与 DISTINCT 计算一致）
+                for (size_t i = 0; i < actual_exprs.size(); ++i)
                 {
                     expression ret;
                     try {
-                        ret = expression::eval(exprs[i]);
+                        ret = expression::eval(actual_exprs[i]);
                     }
                     catch (const char* e) {
                         std::fprintf(stderr, "%s\n", e);
-                        // 清理临时内存
-                        for (auto expr : temp_exprs) {
-                            if (expr->term_type == TERM_COLUMN_REF && expr->column_ref) {
-                                free(expr->column_ref->column);
-                                delete expr->column_ref;
-                            }
-                            delete expr;
-                        }
+                        // 内存由 shared_ptr 自动管理，无需手动清理
                         return false;
                     }
 
@@ -1191,26 +1194,12 @@ void dbms::select_rows(const select_info_t* info)
                     }
                 }
 
-                if (exprs.size() == 0)
-                {
-                    for (size_t i = 0; i < tables.size(); ++i)
-                    {
-                        if (i != 0) std::fprintf(output_file, ",");
-                        tables[i]->dump_record(output_file, records[i]);
-                    }
-                }
+                // SELECT * 现在统一通过 actual_exprs 处理，不再需要 dump_record
 
                 std::fprintf(output_file, "\n");
                 ++counter;
 
-                // 清理临时内存
-                for (auto expr : temp_exprs) {
-                    if (expr->term_type == TERM_COLUMN_REF && expr->column_ref) {
-                        free(expr->column_ref->column);
-                        delete expr->column_ref;
-                    }
-                    delete expr;
-                }
+                // 内存由 shared_ptr 自动管理，无需手动清理
                 return true;
             }
         );
