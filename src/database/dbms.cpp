@@ -10,6 +10,8 @@
 #include <limits>
 #include <algorithm>
 #include <unordered_set>  // 添加这行
+#include <limits>
+#include <memory>  // 如果还没有包含
 
 struct __cache_clear_guard
 {
@@ -743,6 +745,30 @@ void dbms::select_rows(const select_info_t* info)
         expr_names.push_back(expression::to_string(expr));
     }
 
+    // ============ 添加 GROUP BY 支持 ============
+    if (info->group_by != nullptr)
+    {
+        select_rows_with_groupby(
+            info,
+            required_tables,
+            exprs,
+            expr_names,
+            is_aggregate
+        );
+        return;
+    }
+
+    if (is_aggregate)
+    {
+        select_rows_aggregate(
+            info,
+            required_tables,
+            exprs,
+            expr_names
+        );
+        return;
+    }
+
     // 反转表达式顺序，因为解析器使用头插法构建链表，导致顺序与输入相反
     std::reverse(exprs.begin(), exprs.end());
     std::reverse(expr_names.begin(), expr_names.end());
@@ -1095,11 +1121,11 @@ void dbms::select_rows(const select_info_t* info)
                 // 为 DISTINCT 构建行字符串
                 for (size_t i = 0; i < actual_exprs.size(); ++i) {
                     //printf("[DEBUG] Evaluating expression %zu: ", i);
-                    if (actual_exprs[i]->term_type == TERM_COLUMN_REF) {
-                        printf("column %s.%s\n",
-                            actual_exprs[i]->column_ref->table ? actual_exprs[i]->column_ref->table : "NULL",
-                            actual_exprs[i]->column_ref->column);
-                    }
+                    //if (actual_exprs[i]->term_type == TERM_COLUMN_REF) {
+                    //    printf("column %s.%s\n",
+                    //        actual_exprs[i]->column_ref->table ? actual_exprs[i]->column_ref->table : "NULL",
+                    //        actual_exprs[i]->column_ref->column);
+                    //}
 
                     expression ret;
                     try {
@@ -1358,6 +1384,461 @@ void dbms::select_rows_aggregate(
     std::printf("[Info] %d row(s) selected.\n", counter);
     std::fprintf(output_file, "\n");
     std::fflush(output_file);
+}
+
+void dbms::select_rows_with_groupby(
+    const select_info_t* info,
+    const std::vector<table_manager*>& required_tables,
+    const std::vector<expr_node_t*>& exprs,
+    const std::vector<std::string>& expr_names,
+    bool has_aggregate)
+{
+    // 先定义一个静态函数来比较两个expression
+    static auto expression_equal = [](const expression& a, const expression& b) -> bool {
+        if (a.type != b.type) return false;
+
+        switch (a.type) {
+        case TERM_INT:
+            return a.val_i == b.val_i;
+        case TERM_FLOAT:
+            return a.val_f == b.val_f;
+        case TERM_STRING:
+            if (a.val_s == nullptr && b.val_s == nullptr) return true;
+            if (a.val_s == nullptr || b.val_s == nullptr) return false;
+            return strcmp(a.val_s, b.val_s) == 0;
+        case TERM_BOOL:
+            return a.val_b == b.val_b;
+        case TERM_DATE:
+            return a.val_i == b.val_i;
+        case TERM_NULL:
+            return true;  // 所有NULL都相等
+        default:
+            return false;
+        }
+        };
+
+    // 输出表头
+    for (size_t i = 0; i < exprs.size(); ++i)
+    {
+        if (i != 0) std::fprintf(output_file, ",");
+        std::fprintf(output_file, "%s", expr_names[i].c_str());
+    }
+
+    if (exprs.size() == 0)
+    {
+        // SELECT * 的情况
+        bool first_col = true;
+        for (size_t i = 0; i < required_tables.size(); ++i)
+        {
+            table_manager* table = required_tables[i];
+            int col_count = table->get_column_num();
+            const char* table_name = table->get_table_name();
+            for (int j = col_count - 2; j >= 0; --j) {
+                if (!first_col) std::fprintf(output_file, ",");
+                first_col = false;
+                std::fprintf(output_file, "%s.%s", table_name, table->get_column_name(j));
+            }
+        }
+    }
+
+    std::fprintf(output_file, "\n");
+
+    // 收集分组键的表达式
+    std::vector<expr_node_t*> group_exprs;
+    group_by_item_t* group_item = info->group_by;
+    while (group_item != nullptr)
+    {
+        // 创建列引用表达式
+        column_ref_t* col_ref = new column_ref_t;
+        col_ref->table = nullptr;  // 暂时设为null，后面会处理
+        col_ref->column = strdup(group_item->column_name);
+
+        expr_node_t* col_expr = new expr_node_t;
+        col_expr->term_type = TERM_COLUMN_REF;
+        col_expr->column_ref = col_ref;
+
+        group_exprs.push_back(col_expr);
+        group_item = group_item->next;
+    }
+
+    // 用于分组的哈希表
+    struct GroupKey {
+        std::vector<expression> values;
+
+        bool operator==(const GroupKey& other) const {
+            if (values.size() != other.values.size()) return false;
+            for (size_t i = 0; i < values.size(); ++i) {
+                // 这里调用外部定义的 expression_equal
+                if (!expression_equal(values[i], other.values[i])) return false;
+            }
+            return true;
+        }
+    };
+
+    struct GroupKeyHash {
+        size_t operator()(const GroupKey& key) const {
+            size_t hash = 0;
+            for (const auto& expr : key.values) {
+                hash ^= std::hash<int>()(static_cast<int>(expr.type));
+                switch (expr.type) {
+                case TERM_INT:
+                    hash ^= std::hash<int>()(expr.val_i);
+                    break;
+                case TERM_FLOAT: {
+                    // 将float转换为int进行哈希
+                    int int_val;
+                    memcpy(&int_val, &expr.val_f, sizeof(int));
+                    hash ^= std::hash<int>()(int_val);
+                    break;
+                }
+                case TERM_STRING:
+                    if (expr.val_s) {
+                        hash ^= std::hash<std::string>()(expr.val_s);
+                    }
+                    break;
+                case TERM_BOOL:
+                    hash ^= std::hash<bool>()(expr.val_b);
+                    break;
+                case TERM_DATE:
+                    hash ^= std::hash<int>()(expr.val_i);
+                    break;
+                case TERM_NULL:
+                    hash ^= std::hash<int>()(0);
+                    break;
+                default:
+                    break;
+                }
+            }
+            return hash;
+        }
+    };
+
+    // 存储分组数据的结构
+    struct GroupData {
+        // 用于聚合计算的统计信息
+        struct AggregateStats {
+            int count = 0;
+            double sum = 0;
+            double min = std::numeric_limits<double>::max();
+            double max = std::numeric_limits<double>::lowest();
+            bool has_value = false;
+        };
+
+        std::vector<AggregateStats> agg_stats;
+        std::vector<expression> sample_row;  // 用于非聚合列的值
+    };
+
+    std::unordered_map<GroupKey, GroupData, GroupKeyHash> groups;
+
+    // 收集所有列引用，用于构建临时表达式
+    std::vector<std::shared_ptr<expr_node_t>> temp_exprs_holder;
+    std::vector<expr_node_t*> actual_exprs = exprs;
+
+    if (exprs.size() == 0) {
+        // SELECT * 的情况
+        for (size_t i = 0; i < required_tables.size(); ++i) {
+            table_manager* table = required_tables[i];
+            int col_count = table->get_column_num();
+            for (int j = col_count - 2; j >= 0; --j) {
+                const char* col_name = table->get_column_name(j);
+
+                column_ref_t* col_ref = new column_ref_t;
+                col_ref->table = nullptr;
+                col_ref->column = strdup(col_name);
+
+                expr_node_t* col_expr = new expr_node_t;
+                col_expr->term_type = TERM_COLUMN_REF;
+                col_expr->column_ref = col_ref;
+
+                actual_exprs.push_back(col_expr);
+                temp_exprs_holder.push_back(std::shared_ptr<expr_node_t>(col_expr,
+                    [](expr_node_t* p) {
+                        if (p->term_type == TERM_COLUMN_REF && p->column_ref) {
+                            free(p->column_ref->column);
+                            delete p->column_ref;
+                        }
+                        delete p;
+                    }));
+            }
+        }
+    }
+
+    // 遍历所有记录，进行分组
+    iterate(required_tables, info->where,
+        [&](const std::vector<table_manager*>& tables,
+            const std::vector<record_manager*>& records,
+            const std::vector<int>&) -> bool {
+
+                // 计算分组键
+                GroupKey key;
+                for (auto& group_expr : group_exprs) {
+                    try {
+                        expression val = expression::eval(group_expr);
+                        key.values.push_back(expression::copy(val));
+                    }
+                    catch (const char* e) {
+                        std::fprintf(stderr, "%s\n", e);
+                        return false;
+                    }
+                }
+
+                // 查找或创建分组
+                auto& group = groups[key];
+
+                // 如果是第一次遇到这个分组，初始化样本行
+                if (group.sample_row.empty()) {
+                    for (auto& expr : actual_exprs) {
+                        if (expression::is_aggregate(expr)) {
+                            // 对于聚合函数，初始化一个空的expression
+                            expression empty_expr;
+                            empty_expr.type = TERM_NULL;
+                            group.sample_row.push_back(empty_expr);
+                        }
+                        else {
+                            try {
+                                expression val = expression::eval(expr);
+                                group.sample_row.push_back(expression::copy(val));
+                            }
+                            catch (const char* e) {
+                                std::fprintf(stderr, "%s\n", e);
+                                return false;
+                            }
+                        }
+                    }
+                }
+
+                // 更新聚合统计信息
+                if (has_aggregate) {
+                    if (group.agg_stats.empty()) {
+                        group.agg_stats.resize(actual_exprs.size());
+                    }
+
+                    for (size_t i = 0; i < actual_exprs.size(); ++i) {
+                        if (expression::is_aggregate(actual_exprs[i])) {
+                            auto& stats = group.agg_stats[i];
+
+                            // 对于聚合函数，我们需要区分不同类型
+                            operator_type_t op = actual_exprs[i]->op;
+
+                            if (op == OPERATOR_COUNT) {
+                                // COUNT(*) 或 COUNT(column)
+                                stats.count++;
+                                stats.has_value = true;
+
+                                // 如果是 COUNT(column)，还需要检查列值是否为NULL
+                                if (actual_exprs[i]->left != nullptr) {
+                                    try {
+                                        expression val = expression::eval(actual_exprs[i]->left);
+                                        if (val.type == TERM_NULL) {
+                                            // NULL值不计入COUNT(column)
+                                            stats.count--;
+                                        }
+                                    }
+                                    catch (const char* e) {
+                                        std::fprintf(stderr, "%s\n", e);
+                                        return false;
+                                    }
+                                }
+                            }
+                            else if (op == OPERATOR_SUM || op == OPERATOR_AVG ||
+                                op == OPERATOR_MIN || op == OPERATOR_MAX) {
+                                // 对于SUM, AVG, MIN, MAX，需要计算数值
+                                if (actual_exprs[i]->left != nullptr) {
+                                    try {
+                                        expression val = expression::eval(actual_exprs[i]->left);
+
+                                        if (val.type != TERM_NULL) {
+                                            stats.count++;
+                                            stats.has_value = true;
+
+                                            double num_val = 0;
+                                            if (val.type == TERM_INT) {
+                                                num_val = static_cast<double>(val.val_i);
+                                            }
+                                            else if (val.type == TERM_FLOAT) {
+                                                num_val = val.val_f;
+                                            }
+                                            else {
+                                                // 非数值类型，跳过或处理错误
+                                                // 注意：这里不能使用continue，应该跳过这个聚合函数的处理
+                                                continue;  // 跳过这个聚合函数，处理下一个
+                                            }
+
+                                            stats.sum += num_val;
+                                            if (num_val < stats.min) stats.min = num_val;
+                                            if (num_val > stats.max) stats.max = num_val;
+                                        }
+                                    }
+                                    catch (const char* e) {
+                                        std::fprintf(stderr, "%s\n", e);
+                                        return false;
+                                    }
+                                }
+                            }
+                        }  // 结束 if (expression::is_aggregate(actual_exprs[i]))
+                    }  // 结束 for 循环
+                }  // 结束 if (has_aggregate)
+
+                return true;
+        }  // 结束 lambda 函数体
+    );  // 结束 iterate 调用
+
+    // 清理分组表达式
+    for (auto expr : group_exprs) {
+        if (expr->term_type == TERM_COLUMN_REF && expr->column_ref) {
+            free(expr->column_ref->column);
+            delete expr->column_ref;
+        }
+        delete expr;
+    }
+
+    // 输出分组结果
+    int counter = 0;
+    for (auto& [key, group] : groups) {
+        std::vector<expression> output_values;
+
+        if (has_aggregate) {
+            // 处理聚合函数
+            for (size_t i = 0; i < actual_exprs.size(); ++i) {
+                expr_node_t* expr = actual_exprs[i];
+
+                if (expression::is_aggregate(expr)) {
+                    auto& stats = group.agg_stats[i];
+
+                    if (expr->op == OPERATOR_COUNT) {
+                        expression count_expr;
+                        count_expr.type = TERM_INT;
+                        count_expr.val_i = stats.count;
+                        output_values.push_back(count_expr);
+                    }
+                    else if (expr->op == OPERATOR_SUM) {
+                        expression sum_expr;
+                        sum_expr.type = TERM_FLOAT;
+                        sum_expr.val_f = stats.sum;
+                        output_values.push_back(sum_expr);
+                    }
+                    else if (expr->op == OPERATOR_AVG) {
+                        expression avg_expr;
+                        avg_expr.type = TERM_FLOAT;
+                        if (stats.count > 0) {
+                            avg_expr.val_f = stats.sum / stats.count;
+                        }
+                        else {
+                            avg_expr.val_f = 0.0;
+                        }
+                        output_values.push_back(avg_expr);
+                    }
+                    else if (expr->op == OPERATOR_MIN) {
+                        expression min_expr;
+                        min_expr.type = TERM_FLOAT;
+                        if (stats.has_value) {
+                            min_expr.val_f = stats.min;
+                        }
+                        else {
+                            min_expr.val_f = 0.0;
+                        }
+                        output_values.push_back(min_expr);
+                    }
+                    else if (expr->op == OPERATOR_MAX) {
+                        expression max_expr;
+                        max_expr.type = TERM_FLOAT;
+                        if (stats.has_value) {
+                            max_expr.val_f = stats.max;
+                        }
+                        else {
+                            max_expr.val_f = 0.0;
+                        }
+                        output_values.push_back(max_expr);
+                    }
+                }
+                else {
+                    // 非聚合列，使用分组键或样本行中的第一个值
+                    if (i < group.sample_row.size()) {
+                        output_values.push_back(expression::copy(group.sample_row[i]));
+                    }
+                    else {
+                        // 添加NULL值
+                        expression null_expr;
+                        null_expr.type = TERM_NULL;
+                        output_values.push_back(null_expr);
+                    }
+                }
+            }
+        }
+        else {
+            // 没有聚合函数，直接输出样本行
+            for (size_t i = 0; i < group.sample_row.size(); ++i) {
+                output_values.push_back(expression::copy(group.sample_row[i]));
+            }
+        }
+
+        // 输出这一行
+        for (size_t i = 0; i < output_values.size(); ++i) {
+            if (i != 0) std::fprintf(output_file, ",");
+
+            const expression& val = output_values[i];
+            switch (val.type) {
+            case TERM_INT:
+                std::fprintf(output_file, "%d", val.val_i);
+                break;
+            case TERM_FLOAT:
+                std::fprintf(output_file, "%f", val.val_f);
+                break;
+            case TERM_STRING:
+                std::fprintf(output_file, "%s", val.val_s ? val.val_s : "NULL");
+                break;
+            case TERM_BOOL:
+                std::fprintf(output_file, "%s", val.val_b ? "TRUE" : "FALSE");
+                break;
+            case TERM_DATE: {
+                char date_buf[32];
+                time_t time = val.val_i;
+                auto tm = std::localtime(&time);
+                std::strftime(date_buf, 32, DATE_TEMPLATE, tm);
+                std::fprintf(output_file, "%s", date_buf);
+                break;
+            }
+            case TERM_NULL:
+                std::fprintf(output_file, "NULL");
+                break;
+            default:
+                std::fprintf(stderr, "[Error] Data type not supported!\n");
+            }
+
+            // 清理
+            if (val.type == TERM_STRING && val.val_s) {
+                delete[] val.val_s;
+            }
+        }
+
+        std::fprintf(output_file, "\n");
+        ++counter;
+    }
+
+    std::printf("[Info] %d group(s) selected.\n", counter);
+    std::fprintf(output_file, "\n");
+    std::fflush(output_file);
+
+    // 清理分组键中的expression
+    for (auto& key : groups) {
+        for (auto& expr : key.first.values) {
+            if (expr.type == TERM_STRING && expr.val_s) {
+                delete[] expr.val_s;
+            }
+        }
+        for (auto& expr : key.second.sample_row) {
+            if (expr.type == TERM_STRING && expr.val_s) {
+                delete[] expr.val_s;
+            }
+        }
+    }
+
+    // 日志记录
+    if (info->tables && info->tables->data) {
+        table_join_info_t* first_table = (table_join_info_t*)info->tables->data;
+        std::string sql = Logger::format_select_sql(first_table->table);
+        Logger::get_instance()->log_data_op(OperationType::DATA_SELECT, first_table->table, sql, true, counter);
+    }
 }
 
 void dbms::delete_rows(const delete_info_t* info)

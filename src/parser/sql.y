@@ -34,12 +34,17 @@ void yyerror(const char *s);
 	struct rename_info_t      *rename_info;
 	struct alter_info_t       *alter_info;
 	struct order_by_item_t *order_by_item;
+	struct group_by_item_t *group_by_item;  // 新添加
 }
 
 %type <list> order_by_list
 %type <order_by_item> order_by_item
 %type <order_by_item> opt_order_by
 %type <val_i> opt_asc_desc
+
+%type <group_by_item> group_by_item
+%type <group_by_item> opt_group_by
+%type <list> group_by_list
 
 %token TRUE FALSE NULL_TOKEN MIN MAX SUM AVG COUNT
 %token LIKE IS OR AND NOT NEQ GEQ LEQ
@@ -186,13 +191,14 @@ update_stmt         : UPDATE table_name SET column_ref '=' expr where_clause {
 					}
 					;
 
-select_stmt         : SELECT opt_distinct select_expr_list_s FROM table_refs where_clause opt_order_by {
+select_stmt         : SELECT opt_distinct select_expr_list_s FROM table_refs where_clause opt_group_by opt_order_by {
                      	$$ = (select_info_t*)malloc(sizeof(select_info_t));
                      	$$->distinct = $2;
                      	$$->tables = $5;
                      	$$->exprs  = $3;
                      	$$->where  = $6;
-                     	$$->order_by = $7;  // $7 应该是 opt_order_by 返回的 order_by_item_t*（不是 linked_list_t*）
+                     	$$->group_by = $7;  // 添加GROUP BY
+                     	$$->order_by = $8;  // 注意：现在$8是ORDER BY
                      }
                      ;
 
@@ -323,7 +329,51 @@ order_by_item       : IDENTIFIER opt_asc_desc {
                      }
                      ;
 
+opt_group_by        : /* empty */      { $$ = NULL; }
+                    | GROUP BY group_by_list { 
+                        // 将 linked_list_t 转换为 group_by_item_t 链表
+                        group_by_item_t *head = NULL;
+                        group_by_item_t *tail = NULL;
+                        linked_list_t *list = $3;
+                        
+                        while (list != NULL) {
+                            group_by_item_t *item = (group_by_item_t*)list->data;
+                            
+                            if (head == NULL) {
+                                head = tail = item;
+                            } else {
+                                tail->next = item;
+                                tail = item;
+                            }
+                            
+                            linked_list_t *next = list->next;
+                            free(list);  // 释放 linked_list_t 节点
+                            list = next;
+                        }
+                        
+                        $$ = head;
+                    }
+                    ;
 
+group_by_list       : group_by_item {
+                        $$ = (linked_list_t*)malloc(sizeof(linked_list_t));
+                        $$->data = $1;
+                        $$->next = NULL;
+                     }
+                     | group_by_list ',' group_by_item {
+                        $$ = (linked_list_t*)malloc(sizeof(linked_list_t));
+                        $$->data = $3;
+                        $$->next = $1;
+                     }
+                     ;
+
+group_by_item       : IDENTIFIER {
+                        group_by_item_t *item = (group_by_item_t*)calloc(1, sizeof(group_by_item_t));
+                        item->column_name = strdup($1);
+                        item->next = NULL;
+                        $$ = item;
+                     }
+                     ;
 
 opt_asc_desc        : /* empty */ { $$ = 1; }  // 默认升序
                     | ASC         { $$ = 1; }

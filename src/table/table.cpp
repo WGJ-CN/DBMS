@@ -902,7 +902,7 @@ void table_manager::dump_record(FILE *f, record_manager *rm)
 				std::fprintf(f, "%s", date_buf);
 				break; }
 			default:
-				debug_puts("[Error] Data type not supported!");
+				;//debug_puts("[Error] Data type not supported!");
 		}
 	}
 }
